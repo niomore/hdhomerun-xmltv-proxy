@@ -1,0 +1,9 @@
+.git
+.git*ub
+.idea
+.venv
+config
+__pycache__
+*.pyc
+*.pyo
+*.pyd
