@@ -303,8 +303,10 @@ SETUP_TEMPLATE = """
                 discovery is restricted.
             </div>
 
-             }}">
-                <button type="submit">Try Automatic Discovery Again</button>
+            }}">
+                <button type="submit">
+                    Try Automatic Discovery Again
+                </button>
             </form>
         {% endif %}
     </div>
@@ -322,7 +324,7 @@ SETUP_TEMPLATE = """
             <code>http://192.168.1.50/discover.json</code>
         </p>
 
-         }}">
+        }}">
             <label for="hdhr_value">
                 HDHomeRun IP Address or Discovery URL
             </label>
