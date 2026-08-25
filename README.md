@@ -144,4 +144,29 @@ This proxy keeps the setup simple while exposing the official SiliconDust XMLTV 
 
 ## License
 
-MIT License
+This project is licensed under the MIT License. See the LICENSE
+file for details.
+
+## Development Process
+
+Portions of this project were produced with the assistance of generative AI tools. The project owner reviewed, modified, tested, and integrated all code contained in this repository and is responsible for the final released work.
+
+## Third-Party Components
+
+This project uses:
+
+- Flask (BSD-3-Clause)
+- Requests (Apache-2.0)
+- Gunicorn (MIT)
+
+See each project's repository for full license details.
+
+## Disclaimer
+
+This project is an independent open source utility and is not affiliated with,
+endorsed by, or sponsored by SiliconDust, HDHomeRun, Jellyfin, TrueNAS,
+iXsystems, or any related organization.
+
+HDHomeRun is a trademark of SiliconDust USA, Inc.
+Jellyfin is a trademark of the Jellyfin Project.
+TrueNAS is a trademark of iXsystems, Inc.
