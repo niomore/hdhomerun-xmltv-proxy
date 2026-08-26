@@ -314,7 +314,7 @@ SETUP_TEMPLATE = """
             </p>
         </div>
 
-        {{ url_for('save_setup') }}
+        <form method="post" action="{{ url_for('save_setup') }}">
             <input
                 type="hidden"
                 name="hdhr_value"
@@ -335,8 +335,7 @@ SETUP_TEMPLATE = """
             discovery is restricted.
         </div>
 
-         }}"
-        >
+        <form method="post" action="{{ url_for('discover') }}">
             <button type="submit">
                 Try Automatic Discovery Again
             </button>
@@ -361,8 +360,7 @@ SETUP_TEMPLATE = """
             <code>http://192.168.1.50/discover.json</code>
         </p>
 
-         }}"
-        >
+        <form method="post" action="{{ url_for('save_setup') }}">
 
             <label for="hdhr_value">
                 HDHomeRun IP Address or Discovery URL
@@ -471,7 +469,9 @@ DASHBOARD_TEMPLATE = """
             <code>{{ xmltv_url }}</code>
         </p>
 
-         }}"
+        <a
+            class="button"
+            href="{{ xmltv_url }}"
             target="_blank"
             rel="noopener noreferrer"
         >
@@ -482,7 +482,9 @@ DASHBOARD_TEMPLATE = """
             Refresh Guide Now
         </button>
 
-         }}"
+        <a
+            class="button secondary"
+            href="{{ url_for('setup') }}"
         >
             Tuner Settings
         </a>
