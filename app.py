@@ -19,7 +19,11 @@ from flask import (
 
 app = Flask(__name__)
 
-CONFIG_DIRECTORY = Path(os.getenv("CONFIG_DIRECTORY", "/config"))
+# TrueNAS should set CONFIG_DIRECTORY=/config and mount persistent
+# storage there. The local default keeps Windows testing simple.
+CONFIG_DIRECTORY = Path(
+    os.getenv("CONFIG_DIRECTORY", "./config")
+)
 CONFIG_FILE = CONFIG_DIRECTORY / "settings.json"
 
 SILICONDUST_XMLTV_URL = os.getenv(
@@ -27,14 +31,17 @@ SILICONDUST_XMLTV_URL = os.getenv(
     "https://api.hdhomerun.com/api/xmltv",
 )
 
-CACHE_SECONDS = int(os.getenv("CACHE_SECONDS", "21600"))
-REQUEST_TIMEOUT_SECONDS = int(
-    os.getenv("REQUEST_TIMEOUT_SECONDS", "180")
-)
-
 AUTO_DISCOVERY_URL = os.getenv(
     "AUTO_DISCOVERY_URL",
     "http://hdhomerun.local/discover.json",
+)
+
+CACHE_SECONDS = int(
+    os.getenv("CACHE_SECONDS", "21600")
+)
+
+REQUEST_TIMEOUT_SECONDS = int(
+    os.getenv("REQUEST_TIMEOUT_SECONDS", "180")
 )
 
 logging.basicConfig(
@@ -45,6 +52,7 @@ logging.basicConfig(
 logger = logging.getLogger("hdhomerun-xmltv-proxy")
 
 cache_lock = Lock()
+
 cached_xml = None
 cached_at = 0.0
 cached_channel_count = 0
@@ -53,11 +61,11 @@ cached_xml_size = 0
 
 
 class GuideError(Exception):
-    pass
+    """Raised when tuner or guide communication fails."""
 
 
 class ConfigurationError(Exception):
-    pass
+    """Raised when the application configuration is unavailable."""
 
 
 BASE_STYLE = """
@@ -69,12 +77,20 @@ BASE_STYLE = """
         color: #f9fafb;
     }
 
+    * {
+        box-sizing: border-box;
+    }
+
     body {
         margin: 0;
-        background:
-            radial-gradient(circle at top left, #1f3b5e, transparent 42%),
-            #111827;
         min-height: 100vh;
+        background:
+            radial-gradient(
+                circle at top left,
+                #1f3b5e,
+                transparent 42%
+            ),
+            #111827;
     }
 
     .page {
@@ -84,12 +100,12 @@ BASE_STYLE = """
     }
 
     .card {
-        background: rgba(31, 41, 55, 0.96);
+        margin-bottom: 20px;
+        padding: 28px;
         border: 1px solid #374151;
         border-radius: 14px;
-        padding: 28px;
+        background: rgba(31, 41, 55, 0.96);
         box-shadow: 0 20px 45px rgba(0, 0, 0, 0.28);
-        margin-bottom: 20px;
     }
 
     h1 {
@@ -109,81 +125,82 @@ BASE_STYLE = """
 
     label {
         display: block;
-        font-weight: 600;
         margin-bottom: 8px;
+        font-weight: 600;
     }
 
     input {
         width: 100%;
-        box-sizing: border-box;
+        margin-bottom: 15px;
         padding: 13px;
-        border-radius: 8px;
         border: 1px solid #4b5563;
+        border-radius: 8px;
         background: #111827;
         color: #ffffff;
-        margin-bottom: 15px;
         font-size: 15px;
     }
 
-    button, .button {
+    button,
+    .button {
         display: inline-block;
+        margin-right: 8px;
+        margin-bottom: 8px;
+        padding: 12px 18px;
         border: 0;
         border-radius: 8px;
-        padding: 12px 18px;
         background: #2563eb;
-        color: white;
+        color: #ffffff;
         font-weight: 600;
         text-decoration: none;
         cursor: pointer;
-        margin-right: 8px;
-        margin-bottom: 8px;
     }
 
-    button.secondary, .button.secondary {
+    button.secondary,
+    .button.secondary {
         background: #4b5563;
     }
 
-    button.danger, .button.danger {
-        background: #b91c1c;
-    }
-
-    button:hover, .button:hover {
+    button:hover,
+    .button:hover {
         filter: brightness(1.12);
     }
 
-    .success {
-        background: #064e3b;
-        border: 1px solid #059669;
-        color: #d1fae5;
+    .success,
+    .error,
+    .warning {
+        margin-bottom: 18px;
         padding: 14px;
         border-radius: 8px;
-        margin-bottom: 18px;
+    }
+
+    .success {
+        border: 1px solid #059669;
+        background: #064e3b;
+        color: #d1fae5;
     }
 
     .error {
-        background: #7f1d1d;
         border: 1px solid #dc2626;
+        background: #7f1d1d;
         color: #fee2e2;
-        padding: 14px;
-        border-radius: 8px;
-        margin-bottom: 18px;
     }
 
     .warning {
-        background: #78350f;
         border: 1px solid #d97706;
+        background: #78350f;
         color: #fef3c7;
-        padding: 14px;
-        border-radius: 8px;
-        margin-bottom: 18px;
     }
 
     .device {
-        background: #111827;
+        margin: 16px 0;
+        padding: 18px;
         border: 1px solid #374151;
         border-radius: 10px;
-        padding: 18px;
-        margin: 16px 0;
+        background: #111827;
+    }
+
+    .device p {
+        margin: 8px 0;
     }
 
     .device strong {
@@ -192,42 +209,40 @@ BASE_STYLE = """
 
     .grid {
         display: grid;
-        grid-template-columns: repeat(
-            auto-fit,
-            minmax(170px, 1fr)
-        );
+        grid-template-columns:
+            repeat(auto-fit, minmax(150px, 1fr));
         gap: 14px;
         margin: 18px 0;
     }
 
     .metric {
-        background: #111827;
+        padding: 16px;
         border: 1px solid #374151;
         border-radius: 10px;
-        padding: 16px;
+        background: #111827;
     }
 
     .metric .value {
         display: block;
+        margin-top: 6px;
         color: #93c5fd;
         font-size: 24px;
         font-weight: 700;
-        margin-top: 6px;
     }
 
     code {
-        background: #111827;
-        color: #bfdbfe;
         padding: 3px 6px;
         border-radius: 5px;
+        background: #111827;
+        color: #bfdbfe;
         overflow-wrap: anywhere;
     }
 
     .footer {
+        margin-top: 20px;
         color: #9ca3af;
         font-size: 13px;
         text-align: center;
-        margin-top: 20px;
     }
 </style>
 """
@@ -242,13 +257,18 @@ SETUP_TEMPLATE = """
         name="viewport"
         content="width=device-width, initial-scale=1"
     >
+
     <title>HDHomeRun XMLTV Proxy Setup</title>
+
     {{ style|safe }}
 </head>
+
 <body>
 <div class="page">
+
     <div class="card">
         <h1>HDHomeRun XMLTV Proxy</h1>
+
         <p>
             Configure the HDHomeRun tuner that this proxy will use.
             The proxy retrieves a fresh DeviceAuth value whenever it
@@ -256,63 +276,79 @@ SETUP_TEMPLATE = """
         </p>
 
         {% if message %}
-            <div class="{{ message_type }}">{{ message }}</div>
+        <div class="{{ message_type }}">
+            {{ message }}
+        </div>
         {% endif %}
 
         {% if device %}
-            <div class="success">
-                An HDHomeRun tuner was discovered automatically.
-            </div>
 
-            <div class="device">
-                <p>
-                    <strong>Name:</strong>
-                    {{ device.get("FriendlyName", "Unknown") }}
-                </p>
-                <p>
-                    <strong>Model:</strong>
-                    {{ device.get("ModelNumber", "Unknown") }}
-                </p>
-                <p>
-                    <strong>Device ID:</strong>
-                    {{ device.get("DeviceID", "Unknown") }}
-                </p>
-                <p>
-                    <strong>Firmware:</strong>
-                    {{ device.get("FirmwareVersion", "Unknown") }}
-                </p>
-                <p>
-                    <strong>Discovery URL:</strong>
-                    <code>{{ discovered_url }}</code>
-                </p>
-            </div>
+        <div class="success">
+            An HDHomeRun tuner was discovered automatically.
+        </div>
 
-            {{ url_for('save_setup') }}
-                <input
-                    type="hidden"
-                    name="hdhr_value"
-                    value="{{ discovered_url }}"
-                >
-                <button type="submit">Use This Tuner</button>
-            </form>
+        <div class="device">
+            <p>
+                <strong>Name:</strong>
+                {{ device.get("FriendlyName", "Unknown") }}
+            </p>
+
+            <p>
+                <strong>Model:</strong>
+                {{ device.get("ModelNumber", "Unknown") }}
+            </p>
+
+            <p>
+                <strong>Device ID:</strong>
+                {{ device.get("DeviceID", "Unknown") }}
+            </p>
+
+            <p>
+                <strong>Firmware:</strong>
+                {{ device.get("FirmwareVersion", "Unknown") }}
+            </p>
+
+            <p>
+                <strong>Discovery URL:</strong>
+                <code>{{ discovered_url }}</code>
+            </p>
+        </div>
+
+        {{ url_for('save_setup') }}
+            <input
+                type="hidden"
+                name="hdhr_value"
+                value="{{ discovered_url }}"
+            >
+
+            <button type="submit">
+                Use This Tuner
+            </button>
+        </form>
+
         {% else %}
-            <div class="warning">
-                Automatic discovery did not find an HDHomeRun.
-                This can occur when the tuner is on another VLAN,
-                multicast DNS is unavailable, or container network
-                discovery is restricted.
-            </div>
 
-            }}">
-                <button type="submit">
-                    Try Automatic Discovery Again
-                </button>
-            </form>
+        <div class="warning">
+            Automatic discovery did not find an HDHomeRun.
+            This can occur when the tuner is on another VLAN,
+            multicast DNS is unavailable, or container network
+            discovery is restricted.
+        </div>
+
+         }}"
+        >
+            <button type="submit">
+                Try Automatic Discovery Again
+            </button>
+        </form>
+
         {% endif %}
     </div>
 
     <div class="card">
+
         <h2>Manual Tuner Configuration</h2>
+
         <p>
             Enter either the tuner IP address or the full
             <code>discover.json</code> URL.
@@ -320,11 +356,14 @@ SETUP_TEMPLATE = """
 
         <p>
             Examples:
-            <code>192.168.1.50</code> or
+            <code>192.168.1.50</code>
+            or
             <code>http://192.168.1.50/discover.json</code>
         </p>
 
-        }}">
+         }}"
+        >
+
             <label for="hdhr_value">
                 HDHomeRun IP Address or Discovery URL
             </label>
@@ -341,38 +380,46 @@ SETUP_TEMPLATE = """
             <button type="submit">
                 Validate and Save
             </button>
+
         </form>
+
     </div>
 
     <div class="footer">
-        Designed for Jellyfin deployments on TrueNAS and other
-        container platforms.
+        Designed for Jellyfin deployments on TrueNAS and
+        other container platforms.
     </div>
+
 </div>
 </body>
 </html>
 """
-
 
 DASHBOARD_TEMPLATE = """
 <!doctype html>
 <html lang="en">
 <head>
     <meta charset="utf-8">
+
     <meta
         name="viewport"
         content="width=device-width, initial-scale=1"
     >
+
     <title>HDHomeRun XMLTV Proxy</title>
+
     {{ style|safe }}
 </head>
+
 <body>
 <div class="page">
     <div class="card">
         <h1>HDHomeRun XMLTV Proxy</h1>
 
         {% if message %}
-            <div class="{{ message_type }}">{{ message }}</div>
+            <div class="{{ message_type }}">
+                {{ message }}
+            </div>
         {% endif %}
 
         <div class="device">
@@ -380,14 +427,17 @@ DASHBOARD_TEMPLATE = """
                 <strong>Tuner:</strong>
                 {{ device.get("FriendlyName", "Unknown") }}
             </p>
+
             <p>
                 <strong>Model:</strong>
                 {{ device.get("ModelNumber", "Unknown") }}
             </p>
+
             <p>
                 <strong>Device ID:</strong>
                 {{ device.get("DeviceID", "Unknown") }}
             </p>
+
             <p>
                 <strong>Configured URL:</strong>
                 <code>{{ hdhr_url }}</code>
@@ -421,7 +471,10 @@ DASHBOARD_TEMPLATE = """
             <code>{{ xmltv_url }}</code>
         </p>
 
-         }}">
+         }}"
+            target="_blank"
+            rel="noopener noreferrer"
+        >
             Open XMLTV Feed
         </a>
 
@@ -439,10 +492,26 @@ DASHBOARD_TEMPLATE = """
 
     <div class="card">
         <h2>Service Endpoints</h2>
-        <p><code>GET /xmltv</code> XMLTV guide data</p>
-        <p><code>GET /healthz</code> service health</p>
-        <p><code>GET /status</code> JSON cache status</p>
-        <p><code>POST /refresh</code> force a full refresh</p>
+
+        <p>
+            <code>GET /xmltv</code>
+            XMLTV guide data
+        </p>
+
+        <p>
+            <code>GET /healthz</code>
+            service health
+        </p>
+
+        <p>
+            <code>GET /status</code>
+            JSON cache status
+        </p>
+
+        <p>
+            <code>POST /refresh</code>
+            force a full refresh
+        </p>
     </div>
 
     <div class="footer">
@@ -455,20 +524,26 @@ DASHBOARD_TEMPLATE = """
 document
     .getElementById("refreshButton")
     .addEventListener("click", async function () {
-        const result = document.getElementById("refreshResult");
+        const result =
+            document.getElementById("refreshResult");
+
         result.className = "warning";
         result.textContent = "Refreshing guide data...";
 
         try {
             const response = await fetch(
                 "{{ url_for('refresh_guide') }}",
-                { method: "POST" }
+                {
+                    method: "POST"
+                }
             );
 
             const data = await response.json();
 
             if (!response.ok) {
-                throw new Error(data.error || "Refresh failed");
+                throw new Error(
+                    data.error || "Refresh failed"
+                );
             }
 
             result.className = "success";
@@ -497,7 +572,10 @@ document
 
 def ensure_config_directory():
     try:
-        CONFIG_DIRECTORY.mkdir(parents=True, exist_ok=True)
+        CONFIG_DIRECTORY.mkdir(
+            parents=True,
+            exist_ok=True,
+        )
     except OSError as exc:
         raise ConfigurationError(
             f"Unable to create configuration directory "
@@ -510,7 +588,10 @@ def load_settings():
         return {}
 
     try:
-        with CONFIG_FILE.open("r", encoding="utf-8") as file:
+        with CONFIG_FILE.open(
+                "r",
+                encoding="utf-8",
+        ) as file:
             settings = json.load(file)
     except (OSError, json.JSONDecodeError) as exc:
         raise ConfigurationError(
@@ -519,7 +600,8 @@ def load_settings():
 
     if not isinstance(settings, dict):
         raise ConfigurationError(
-            "The configuration file does not contain a JSON object"
+            "The configuration file does not contain "
+            "a JSON object"
         )
 
     return settings
@@ -531,8 +613,15 @@ def save_settings(settings):
     temporary_file = CONFIG_FILE.with_suffix(".tmp")
 
     try:
-        with temporary_file.open("w", encoding="utf-8") as file:
-            json.dump(settings, file, indent=2)
+        with temporary_file.open(
+                "w",
+                encoding="utf-8",
+        ) as file:
+            json.dump(
+                settings,
+                file,
+                indent=2,
+            )
 
         temporary_file.replace(CONFIG_FILE)
     except OSError as exc:
@@ -561,8 +650,16 @@ def normalize_hdhr_value(value):
 
     if not parsed.hostname:
         raise ConfigurationError(
-            "The HDHomeRun URL does not contain a valid hostname"
+            "The HDHomeRun URL does not contain "
+            "a valid hostname"
         )
+
+    try:
+        port = f":{parsed.port}" if parsed.port else ""
+    except ValueError as exc:
+        raise ConfigurationError(
+            "The HDHomeRun URL contains an invalid port"
+        ) from exc
 
     path = parsed.path.rstrip("/")
 
@@ -570,8 +667,6 @@ def normalize_hdhr_value(value):
         path = "/discover.json"
     elif not path.endswith("/discover.json"):
         path = f"{path}/discover.json"
-
-    port = f":{parsed.port}" if parsed.port else ""
 
     return (
         f"{parsed.scheme}://"
@@ -587,15 +682,18 @@ def request_device(hdhr_url):
             hdhr_url,
             timeout=10,
         )
+
         response.raise_for_status()
         device = response.json()
     except requests.RequestException as exc:
         raise GuideError(
-            f"Unable to contact the HDHomeRun at {hdhr_url}: {exc}"
+            f"Unable to contact the HDHomeRun at "
+            f"{hdhr_url}: {exc}"
         ) from exc
     except ValueError as exc:
         raise GuideError(
-            "The HDHomeRun discovery endpoint returned invalid JSON"
+            "The HDHomeRun discovery endpoint returned "
+            "invalid JSON"
         ) from exc
 
     required_fields = (
@@ -621,10 +719,23 @@ def request_device(hdhr_url):
 def attempt_auto_discovery():
     try:
         device = request_device(AUTO_DISCOVERY_URL)
-        return AUTO_DISCOVERY_URL, device, None
+
+        return (
+            AUTO_DISCOVERY_URL,
+            device,
+            None,
+        )
     except GuideError as exc:
-        logger.info("Automatic discovery failed: %s", exc)
-        return None, None, str(exc)
+        logger.info(
+            "Automatic discovery failed: %s",
+            exc,
+        )
+
+        return (
+            None,
+            None,
+            str(exc),
+        )
 
 
 def get_configured_hdhr_url():
@@ -652,18 +763,23 @@ def fetch_xmltv():
     try:
         response = requests.get(
             SILICONDUST_XMLTV_URL,
-            params={"DeviceAuth": device_auth},
+            params={
+                "DeviceAuth": device_auth,
+            },
             headers={
                 "Accept": "application/xml,text/xml",
                 "Accept-Encoding": "gzip",
-                "User-Agent": "HDHomeRun-XMLTV-Proxy/1.0",
+                "User-Agent":
+                    "HDHomeRun-XMLTV-Proxy/1.0",
             },
             timeout=REQUEST_TIMEOUT_SECONDS,
         )
+
         response.raise_for_status()
     except requests.RequestException as exc:
         raise GuideError(
-            f"Unable to download the SiliconDust XMLTV feed: {exc}"
+            "Unable to download the SiliconDust "
+            f"XMLTV feed: {exc}"
         ) from exc
 
     xml_data = response.content
@@ -680,8 +796,8 @@ def fetch_xmltv():
             or stripped_data.startswith(b"<tv")
     ):
         raise GuideError(
-            "SiliconDust returned data that does not appear "
-            "to be XMLTV"
+            "SiliconDust returned data that does not "
+            "appear to be XMLTV"
         )
 
     channel_count = xml_data.count(b"<channel ")
@@ -710,7 +826,6 @@ def fetch_xmltv():
         xml_data,
         channel_count,
         program_count,
-        device,
     )
 
 
@@ -767,12 +882,31 @@ def get_cached_xmltv(force_refresh=False):
                 True,
             )
 
-        (
-            xml_data,
-            channel_count,
-            program_count,
-            _,
-        ) = fetch_xmltv()
+        try:
+            (
+                xml_data,
+                channel_count,
+                program_count,
+            ) = fetch_xmltv()
+        except GuideError:
+            # If an upstream refresh fails but an older guide is
+            # available, return the older guide instead of leaving
+            # Jellyfin without any guide information.
+            if cached_xml is not None and not force_refresh:
+                logger.warning(
+                    "Guide refresh failed. Serving stale "
+                    "cached XMLTV data."
+                )
+
+                return (
+                    cached_xml,
+                    cached_channel_count,
+                    cached_program_count,
+                    cached_xml_size,
+                    True,
+                )
+
+            raise
 
         cached_xml = xml_data
         cached_at = time.time()
@@ -799,6 +933,7 @@ def format_size(byte_count):
         return f"{megabytes:.1f} MB"
 
     kilobytes = byte_count / 1024
+
     return f"{kilobytes:.0f} KB"
 
 
@@ -806,7 +941,10 @@ def format_cache_age():
     if cached_xml is None:
         return "Not cached"
 
-    age = max(0, int(time.time() - cached_at))
+    age = max(
+        0,
+        int(time.time() - cached_at),
+    )
 
     if age < 60:
         return f"{age}s"
@@ -823,7 +961,9 @@ def index():
         hdhr_url = get_configured_hdhr_url()
         device = request_device(hdhr_url)
     except ConfigurationError:
-        return redirect(url_for("setup"))
+        return redirect(
+            url_for("setup")
+        )
     except GuideError as exc:
         return render_template_string(
             DASHBOARD_TEMPLATE,
@@ -834,7 +974,10 @@ def index():
             programs=cached_program_count,
             xml_size=format_size(cached_xml_size),
             cache_age=format_cache_age(),
-            xmltv_url=request.url_root.rstrip("/") + "/xmltv",
+            xmltv_url=(
+                    request.url_root.rstrip("/")
+                    + "/xmltv"
+            ),
             message=str(exc),
             message_type="error",
         )
@@ -848,7 +991,10 @@ def index():
         programs=cached_program_count,
         xml_size=format_size(cached_xml_size),
         cache_age=format_cache_age(),
-        xmltv_url=request.url_root.rstrip("/") + "/xmltv",
+        xmltv_url=(
+                request.url_root.rstrip("/")
+                + "/xmltv"
+        ),
         message=None,
         message_type=None,
     )
@@ -859,13 +1005,18 @@ def setup():
     current_value = ""
 
     try:
-        current_value = load_settings().get("hdhr_url", "")
+        current_value = load_settings().get(
+            "hdhr_url",
+            "",
+        )
     except ConfigurationError:
         pass
 
-    discovered_url, device, discovery_error = (
-        attempt_auto_discovery()
-    )
+    (
+        discovered_url,
+        device,
+        discovery_error,
+    ) = attempt_auto_discovery()
 
     message = None
     message_type = None
@@ -873,7 +1024,8 @@ def setup():
     if discovery_error and current_value:
         message = (
             "Automatic discovery was unavailable. "
-            "The existing manual configuration is shown below."
+            "The existing manual configuration is "
+            "shown below."
         )
         message_type = "warning"
 
@@ -890,9 +1042,11 @@ def setup():
 
 @app.post("/discover")
 def discover():
-    discovered_url, device, discovery_error = (
-        attempt_auto_discovery()
-    )
+    (
+        discovered_url,
+        device,
+        discovery_error,
+    ) = attempt_auto_discovery()
 
     if device:
         return render_template_string(
@@ -901,7 +1055,9 @@ def discover():
             device=device,
             discovered_url=discovered_url,
             current_value="",
-            message="HDHomeRun discovery succeeded.",
+            message=(
+                "HDHomeRun discovery succeeded."
+            ),
             message_type="success",
         )
 
@@ -924,25 +1080,34 @@ def save_setup():
     )
 
     try:
-        hdhr_url = normalize_hdhr_value(submitted_value)
+        hdhr_url = normalize_hdhr_value(
+            submitted_value
+        )
+
         device = request_device(hdhr_url)
 
         save_settings({
             "hdhr_url": hdhr_url,
             "device_id": device.get("DeviceID"),
-            "friendly_name": device.get("FriendlyName"),
+            "friendly_name":
+                device.get("FriendlyName"),
         })
 
         clear_cache()
 
         logger.info(
-            "Saved HDHomeRun configuration for device %s",
+            "Saved HDHomeRun configuration for "
+            "device %s",
             device.get("DeviceID"),
         )
 
-        return redirect(url_for("index"))
-
-    except (ConfigurationError, GuideError) as exc:
+        return redirect(
+            url_for("index")
+        )
+    except (
+            ConfigurationError,
+            GuideError,
+    ) as exc:
         return render_template_string(
             SETUP_TEMPLATE,
             style=BASE_STYLE,
@@ -964,24 +1129,40 @@ def xmltv():
             xml_size,
             cache_hit,
         ) = get_cached_xmltv()
-    except ConfigurationError:
-        return redirect(url_for("setup"))
+    except ConfigurationError as exc:
+        return jsonify({
+            "error": str(exc),
+            "setup_url": url_for(
+                "setup",
+                _external=True,
+            ),
+        }), 503
     except GuideError as exc:
         logger.error("%s", exc)
-        return jsonify({"error": str(exc)}), 502
+
+        return jsonify({
+            "error": str(exc),
+        }), 502
 
     return Response(
         xml_data,
         status=200,
-        content_type="application/xml; charset=utf-8",
+        content_type=(
+            "application/xml; charset=utf-8"
+        ),
         headers={
             "Cache-Control": "no-store",
             "X-XMLTV-Cache": (
-                "HIT" if cache_hit else "MISS"
+                "HIT"
+                if cache_hit
+                else "MISS"
             ),
-            "X-XMLTV-Channels": str(channel_count),
-            "X-XMLTV-Programs": str(program_count),
-            "X-XMLTV-Bytes": str(xml_size),
+            "X-XMLTV-Channels":
+                str(channel_count),
+            "X-XMLTV-Programs":
+                str(program_count),
+            "X-XMLTV-Bytes":
+                str(xml_size),
         },
     )
 
@@ -995,10 +1176,18 @@ def refresh_guide():
             program_count,
             xml_size,
             _,
-        ) = get_cached_xmltv(force_refresh=True)
-    except (ConfigurationError, GuideError) as exc:
+        ) = get_cached_xmltv(
+            force_refresh=True
+        )
+    except (
+            ConfigurationError,
+            GuideError,
+    ) as exc:
         logger.error("%s", exc)
-        return jsonify({"error": str(exc)}), 502
+
+        return jsonify({
+            "error": str(exc),
+        }), 502
 
     return jsonify({
         "status": "refreshed",
@@ -1026,12 +1215,18 @@ def status():
     return jsonify({
         "configured": hdhr_url is not None,
         "hdhr_url": hdhr_url,
-        "cache_populated": cached_xml is not None,
-        "cache_age_seconds": cache_age_seconds,
-        "cache_ttl_seconds": CACHE_SECONDS,
-        "channels": cached_channel_count,
-        "programs": cached_program_count,
-        "xml_bytes": cached_xml_size,
+        "cache_populated":
+            cached_xml is not None,
+        "cache_age_seconds":
+            cache_age_seconds,
+        "cache_ttl_seconds":
+            CACHE_SECONDS,
+        "channels":
+            cached_channel_count,
+        "programs":
+            cached_program_count,
+        "xml_bytes":
+            cached_xml_size,
     })
 
 
@@ -1054,18 +1249,35 @@ def health():
     return jsonify({
         "status": "healthy",
         "device": {
-            "friendly_name": device.get("FriendlyName"),
-            "model_number": device.get("ModelNumber"),
-            "firmware_version": device.get(
-                "FirmwareVersion"
-            ),
-            "device_id": device.get("DeviceID"),
+            "friendly_name":
+                device.get("FriendlyName"),
+            "model_number":
+                device.get("ModelNumber"),
+            "firmware_version":
+                device.get("FirmwareVersion"),
+            "device_id":
+                device.get("DeviceID"),
         },
     })
 
 
+@app.get("/version")
+def version():
+    return jsonify({
+        "service": "HDHomeRun XMLTV Proxy",
+        "version": "1.0.0",
+    })
+
+
+@app.get("/favicon.ico")
+def favicon():
+    return Response(status=204)
+
+
 if __name__ == "__main__":
-    port = int(os.getenv("PORT", "8080"))
+    port = int(
+        os.getenv("PORT", "8080")
+    )
 
     app.run(
         host="0.0.0.0",
